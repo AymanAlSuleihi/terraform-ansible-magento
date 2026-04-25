@@ -1,0 +1,26 @@
+server_name = "magento-node-01"
+server_type = "cx23"
+location    = "fsn1"
+image       = "ubuntu-24.04"
+
+ssh_keys = [
+  "workstation-ed25519",
+]
+
+admin_username = "magento"
+
+labels = {
+  environment = "dev"
+  role        = "magento"
+}
+
+enable_ipv6       = true
+backups           = false
+delete_protection = false
+
+# Optional extra cloud-init or shell script appended after the built-in hardening.
+# user_data = <<-EOT
+# #cloud-config
+# packages:
+#   - curl
+# EOT
