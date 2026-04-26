@@ -1,0 +1,147 @@
+---
+- name: Download Composer {{ magento_composer_version }}
+  ansible.builtin.get_url:
+    url: "https://getcomposer.org/download/{{ magento_composer_version }}/composer.phar"
+    dest: /usr/local/bin/composer
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure Composer home exists
+  ansible.builtin.file:
+    path: "{{ magento_composer_home }}"
+    state: directory
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0700"
+
+- name: Configure Composer authentication for repo.magento.com
+  ansible.builtin.template:
+    src: composer-auth.json.j2
+    dest: "{{ magento_composer_home }}/auth.json"
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0600"
+  no_log: true
+
+- name: Create Magento project via Composer
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - create-project
+      - --no-interaction
+      - --repository-url=https://repo.magento.com/
+      - "{{ magento_project_package }}={{ magento_version }}"
+      - "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  args:
+    creates: "{{ magento_app_root }}/bin/magento"
+
+- name: Ensure Magento files have the expected ownership
+  ansible.builtin.file:
+    path: "{{ magento_app_root }}"
+    state: directory
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    recurse: true
+
+- name: Ensure Magento CLI is executable
+  ansible.builtin.file:
+    path: "{{ magento_app_root }}/bin/magento"
+    mode: "u+x"
+
+- name: Persist Magento shared-group umask
+  ansible.builtin.copy:
+    content: "{{ magento_umask }}\n"
+    dest: "{{ magento_app_root }}/magento_umask"
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0644"
+
+- name: Find Magento writable files missing group write permissions
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/var"
+      - "{{ magento_app_root }}/generated"
+      - "{{ magento_app_root }}/vendor"
+      - "{{ magento_app_root }}/pub/static"
+      - "{{ magento_app_root }}/pub/media"
+      - "{{ magento_app_root }}/app/etc"
+      - -type
+      - f
+      - "!"
+      - -perm
+      - /020
+      - -print
+  register: magento_writable_files_missing_group_write
+  changed_when: false
+
+- name: Ensure Magento writable files are group writable
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/var"
+      - "{{ magento_app_root }}/generated"
+      - "{{ magento_app_root }}/vendor"
+      - "{{ magento_app_root }}/pub/static"
+      - "{{ magento_app_root }}/pub/media"
+      - "{{ magento_app_root }}/app/etc"
+      - -type
+      - f
+      - -exec
+      - chmod
+      - g+w
+      - "{}"
+      - +
+  changed_when: true
+  when: magento_writable_files_missing_group_write.stdout | length > 0
+
+- name: Find Magento writable directories missing shared-group permissions
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/var"
+      - "{{ magento_app_root }}/generated"
+      - "{{ magento_app_root }}/vendor"
+      - "{{ magento_app_root }}/pub/static"
+      - "{{ magento_app_root }}/pub/media"
+      - "{{ magento_app_root }}/app/etc"
+      - -type
+      - d
+      - "("
+      - "!"
+      - -perm
+      - /020
+      - -o
+      - "!"
+      - -perm
+      - /2000
+      - ")"
+      - -print
+  register: magento_writable_directories_missing_shared_group_permissions
+  changed_when: false
+
+- name: Ensure Magento writable directories are group writable and setgid
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/var"
+      - "{{ magento_app_root }}/generated"
+      - "{{ magento_app_root }}/vendor"
+      - "{{ magento_app_root }}/pub/static"
+      - "{{ magento_app_root }}/pub/media"
+      - "{{ magento_app_root }}/app/etc"
+      - -type
+      - d
+      - -exec
+      - chmod
+      - g+ws
+      - "{}"
+      - +
+  changed_when: true
+  when: magento_writable_directories_missing_shared_group_permissions.stdout | length > 0

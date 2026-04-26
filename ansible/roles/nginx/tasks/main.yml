@@ -1,0 +1,49 @@
+---
+- name: Install nginx packages
+  ansible.builtin.apt:
+    name:
+      - nginx
+    state: present
+
+- name: Check whether a Let's Encrypt certificate exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ magento_domain }}/fullchain.pem"
+  register: nginx_tls_certificate
+
+- name: Copy Magento nginx sample to the active include path
+  ansible.builtin.copy:
+    src: "{{ magento_app_root }}/nginx.conf.sample"
+    dest: "{{ magento_app_root }}/nginx.conf"
+    remote_src: true
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Render Magento nginx site
+  ansible.builtin.template:
+    src: "{{ 'magento-ssl.conf.j2' if (magento_enable_https | bool and nginx_tls_certificate.stat.exists) else 'magento-http.conf.j2' }}"
+    dest: /etc/nginx/sites-available/magento.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Enable Magento nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/magento.conf
+    dest: /etc/nginx/sites-enabled/magento.conf
+    state: link
+  notify: Reload nginx
+
+- name: Ensure nginx service is enabled and running
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true

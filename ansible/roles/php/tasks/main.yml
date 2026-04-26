@@ -1,0 +1,47 @@
+---
+- name: Install PHP packages
+  ansible.builtin.apt:
+    name: "{{ magento_php_packages }}"
+    state: present
+
+- name: Configure Magento PHP settings
+  ansible.builtin.template:
+    src: magento.ini.j2
+    dest: "/etc/php/{{ magento_php_version }}/mods-available/magento.ini"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart PHP-FPM
+
+- name: Enable Magento PHP settings
+  ansible.builtin.file:
+    src: "/etc/php/{{ magento_php_version }}/mods-available/magento.ini"
+    dest: "/etc/php/{{ magento_php_version }}/fpm/conf.d/99-magento.ini"
+    state: link
+  notify: Restart PHP-FPM
+
+- name: Configure dedicated PHP-FPM pool
+  ansible.builtin.template:
+    src: magento-fpm.conf.j2
+    dest: "/etc/php/{{ magento_php_version }}/fpm/pool.d/magento.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart PHP-FPM
+
+- name: Ensure PHP-FPM service is enabled and running
+  ansible.builtin.service:
+    name: "php{{ magento_php_version }}-fpm"
+    state: started
+    enabled: true
+
+- name: Check whether the Magento PHP-FPM socket exists
+  ansible.builtin.stat:
+    path: "/run/php/php{{ magento_php_version }}-fpm-magento.sock"
+  register: php_magento_fpm_socket
+
+- name: Restart PHP-FPM when the Magento socket is missing
+  ansible.builtin.service:
+    name: "php{{ magento_php_version }}-fpm"
+    state: restarted
+  when: not php_magento_fpm_socket.stat.exists

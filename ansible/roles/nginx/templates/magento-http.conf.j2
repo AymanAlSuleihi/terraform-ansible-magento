@@ -1,0 +1,19 @@
+upstream fastcgi_backend {
+    server unix:/run/php/php{{ magento_php_version }}-fpm-magento.sock;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ magento_domain }};
+    set $MAGE_ROOT {{ magento_app_root }};
+    client_max_body_size {{ magento_nginx_client_max_body_size }};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ magento_acme_webroot }};
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    include {{ magento_app_root }}/nginx.conf;
+}

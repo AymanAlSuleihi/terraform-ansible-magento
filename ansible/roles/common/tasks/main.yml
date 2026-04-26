@@ -1,0 +1,237 @@
+---
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install common system packages
+  ansible.builtin.apt:
+    name: "{{ magento_common_packages }}"
+    state: present
+
+- name: Ensure swap file exists
+  ansible.builtin.command:
+    argv:
+      - dd
+      - if=/dev/zero
+      - "of={{ magento_swap_file }}"
+      - bs=1M
+      - "count={{ magento_swap_size_mb }}"
+      - status=none
+  args:
+    creates: "{{ magento_swap_file }}"
+  when: magento_swap_enabled | bool
+
+- name: Ensure swap file permissions are restrictive
+  ansible.builtin.file:
+    path: "{{ magento_swap_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: magento_swap_enabled | bool
+
+- name: Detect whether the swap file is already formatted
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -o
+      - value
+      - -s
+      - TYPE
+      - "{{ magento_swap_file }}"
+  register: common_swap_signature
+  failed_when: false
+  changed_when: false
+  when: magento_swap_enabled | bool
+
+- name: Format the swap file
+  ansible.builtin.command:
+    argv:
+      - mkswap
+      - "{{ magento_swap_file }}"
+  changed_when: true
+  when:
+    - magento_swap_enabled | bool
+    - common_swap_signature.stdout != "swap"
+
+- name: Persist swap file in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^{{ magento_swap_file }}\\s"
+    line: "{{ magento_swap_file }} none swap sw 0 0"
+    state: present
+  when: magento_swap_enabled | bool
+
+- name: Read active swap devices
+  ansible.builtin.command:
+    argv:
+      - swapon
+      - --show=NAME
+      - --noheadings
+  register: common_active_swaps
+  changed_when: false
+  when: magento_swap_enabled | bool
+
+- name: Enable the swap file
+  ansible.builtin.command:
+    argv:
+      - swapon
+      - "{{ magento_swap_file }}"
+  changed_when: true
+  when:
+    - magento_swap_enabled | bool
+    - magento_swap_file not in common_active_swaps.stdout_lines
+
+- name: Configure kernel memory tuning for Magento
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-magento-memory.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      vm.swappiness = {{ magento_swap_swappiness }}
+      vm.vfs_cache_pressure = {{ magento_swap_vfs_cache_pressure }}
+  notify: Apply sysctl settings
+
+- name: Ensure application user is in web group
+  ansible.builtin.user:
+    name: "{{ magento_app_user }}"
+    groups: "{{ magento_app_group }}"
+    append: true
+
+- name: Set system timezone
+  ansible.builtin.command:
+    argv:
+      - timedatectl
+      - set-timezone
+      - "{{ magento_timezone }}"
+  changed_when: false
+
+- name: Ensure timezone is persisted in /etc/timezone
+  ansible.builtin.copy:
+    content: "{{ magento_timezone }}\n"
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure ACME challenge webroot exists
+  ansible.builtin.file:
+    path: "{{ magento_acme_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure UFW IPv6 policy matches the server configuration
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^IPV6="
+    line: "IPV6={{ 'yes' if magento_ufw_enable_ipv6 else 'no' }}"
+    state: present
+  register: common_ufw_ipv6
+  when: magento_ufw_enabled | bool
+
+- name: Ensure UFW default incoming policy is DROP
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^DEFAULT_INPUT_POLICY="
+    line: 'DEFAULT_INPUT_POLICY="DROP"'
+    state: present
+  register: common_ufw_default_input
+  when: magento_ufw_enabled | bool
+
+- name: Ensure UFW default outgoing policy is ACCEPT
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^DEFAULT_OUTPUT_POLICY="
+    line: 'DEFAULT_OUTPUT_POLICY="ACCEPT"'
+    state: present
+  register: common_ufw_default_output
+  when: magento_ufw_enabled | bool
+
+- name: Ensure UFW default forward policy is DROP
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^DEFAULT_FORWARD_POLICY="
+    line: 'DEFAULT_FORWARD_POLICY="DROP"'
+    state: present
+  register: common_ufw_default_forward
+  when: magento_ufw_enabled | bool
+
+- name: Allow SSH through UFW
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - "{{ magento_ssh_port }}/tcp"
+  register: common_ufw_allow_ssh
+  changed_when: "'Skipping adding existing rule' not in common_ufw_allow_ssh.stdout"
+  when: magento_ufw_enabled | bool
+
+- name: Allow HTTP through UFW
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - 80/tcp
+  register: common_ufw_allow_http
+  changed_when: "'Skipping adding existing rule' not in common_ufw_allow_http.stdout"
+  when: magento_ufw_enabled | bool
+
+- name: Allow HTTPS through UFW
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - 443/tcp
+  register: common_ufw_allow_https
+  changed_when: "'Skipping adding existing rule' not in common_ufw_allow_https.stdout"
+  when:
+    - magento_ufw_enabled | bool
+    - magento_enable_https | bool
+
+- name: Check UFW status
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - status
+  register: common_ufw_status
+  changed_when: false
+  when: magento_ufw_enabled | bool
+
+- name: Reload UFW when configuration changes on an active firewall
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - reload
+  changed_when: false
+  when:
+    - magento_ufw_enabled | bool
+    - "'Status: active' in common_ufw_status.stdout"
+    - common_ufw_ipv6.changed
+      or common_ufw_default_input.changed
+      or common_ufw_default_output.changed
+      or common_ufw_default_forward.changed
+      or common_ufw_allow_ssh.changed
+      or common_ufw_allow_http.changed
+      or (magento_enable_https | bool and common_ufw_allow_https.changed)
+
+- name: Enable UFW
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - --force
+      - enable
+  changed_when: true
+  when:
+    - magento_ufw_enabled | bool
+    - "'Status: active' not in common_ufw_status.stdout"
+
+- name: Ensure Magento parent directory exists
+  ansible.builtin.file:
+    path: "{{ magento_app_root | dirname }}"
+    state: directory
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0755"

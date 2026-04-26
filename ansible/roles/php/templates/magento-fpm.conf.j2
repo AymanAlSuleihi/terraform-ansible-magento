@@ -1,0 +1,17 @@
+[magento]
+user = {{ magento_app_user }}
+group = {{ magento_app_group }}
+listen = /run/php/php{{ magento_php_version }}-fpm-magento.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = dynamic
+pm.max_children = {{ magento_php_max_children }}
+pm.start_servers = {{ magento_php_start_servers }}
+pm.min_spare_servers = {{ magento_php_min_spare_servers }}
+pm.max_spare_servers = {{ magento_php_max_spare_servers }}
+pm.max_requests = {{ magento_php_max_requests }}
+catch_workers_output = yes
+decorate_workers_output = no
+clear_env = no
+php_admin_value[memory_limit] = {{ magento_php_memory_limit }}

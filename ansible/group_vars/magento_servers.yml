@@ -1,0 +1,106 @@
+magento_domain: ""
+magento_letsencrypt_email: ""
+
+magento_app_user: "{{ ansible_user | default('magento') }}"
+magento_app_group: "www-data"
+magento_app_root: "/var/www/magento"
+magento_acme_webroot: "/var/www/letsencrypt"
+magento_umask: "002"
+
+magento_timezone: "UTC"
+magento_locale: "en_GB"
+magento_language: "en_GB"
+magento_currency: "GBP"
+
+magento_swap_enabled: true
+magento_swap_file: "/swapfile"
+magento_swap_size_mb: 4096
+magento_swap_swappiness: 10
+magento_swap_vfs_cache_pressure: 50
+
+magento_ufw_enabled: true
+magento_ufw_enable_ipv6: true
+magento_ssh_port: 22
+
+magento_version: "2.4.8-p4"
+magento_edition: "community"
+magento_project_package: "magento/project-community-edition"
+magento_base_url: "https://{{ magento_domain }}/"
+magento_admin_firstname: "Admin"
+magento_admin_lastname: "User"
+magento_admin_email: ""
+magento_admin_user: "admin"
+magento_admin_password: ""
+magento_deploy_mode: "developer"
+magento_run_post_install_build: true
+
+magento_repo_public_key: ""
+magento_repo_private_key: ""
+magento_composer_version: "2.9.3"
+magento_composer_home: "/home/{{ magento_app_user }}/.config/composer"
+
+magento_enable_https: true
+magento_enable_tls_redirect: true
+magento_nginx_client_max_body_size: "64m"
+
+magento_php_version: "8.3"
+magento_php_memory_limit: "2G"
+magento_php_post_max_size: "64M"
+magento_php_upload_max_filesize: "64M"
+magento_php_max_children: 20
+magento_php_start_servers: 4
+magento_php_min_spare_servers: 2
+magento_php_max_spare_servers: 6
+magento_php_max_requests: 500
+magento_php_opcache_memory_consumption: 512
+magento_php_packages:
+  - "php8.3-bcmath"
+  - "php8.3-bz2"
+  - "php8.3-cli"
+  - "php8.3-common"
+  - "php8.3-curl"
+  - "php8.3-fpm"
+  - "php8.3-gd"
+  - "php8.3-intl"
+  - "php8.3-mbstring"
+  - "php8.3-mysql"
+  - "php8.3-opcache"
+  - "php8.3-readline"
+  - "php8.3-soap"
+  - "php8.3-sqlite3"
+  - "php8.3-xml"
+  - "php8.3-xsl"
+  - "php8.3-zip"
+
+magento_mariadb_use_vendor_repo: true
+magento_mariadb_server_version: "11.4"
+magento_mariadb_buffer_pool_size: "512M"
+magento_db_name: "magento"
+magento_db_user: "magento"
+magento_db_password: ""
+
+magento_opensearch_package: "opensearch"
+magento_opensearch_heap_size: "1g"
+magento_opensearch_disable_security: true
+magento_opensearch_initial_admin_password: ""
+magento_opensearch_index_prefix: "magento2"
+
+magento_common_packages:
+  - acl
+  - apt-transport-https
+  - bash
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - gzip
+  - imagemagick
+  - lsb-release
+  - lsof
+  - python3-pymysql
+  - sed
+  - software-properties-common
+  - tar
+  - unzip
+  - ufw
+  - wget

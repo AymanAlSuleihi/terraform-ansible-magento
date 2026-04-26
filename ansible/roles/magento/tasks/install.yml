@@ -1,0 +1,224 @@
+---
+- name: Install Magento application
+  ansible.builtin.command:
+    argv: "{{ magento_setup_install_args }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  no_log: true
+  args:
+    creates: "{{ magento_app_root }}/app/etc/env.php"
+  vars:
+    magento_setup_install_args: >-
+      {{
+        [
+          magento_app_root ~ '/bin/magento',
+          'setup:install',
+          '--base-url=' ~ magento_base_url,
+          '--db-host=127.0.0.1',
+          '--db-name=' ~ magento_db_name,
+          '--db-user=' ~ magento_db_user,
+          '--db-password=' ~ magento_db_password,
+          '--search-engine=opensearch',
+          '--opensearch-host=127.0.0.1',
+          '--opensearch-port=9200',
+          '--opensearch-index-prefix=' ~ magento_opensearch_index_prefix,
+          '--opensearch-timeout=15',
+          '--admin-firstname=' ~ magento_admin_firstname,
+          '--admin-lastname=' ~ magento_admin_lastname,
+          '--admin-email=' ~ magento_admin_email,
+          '--admin-user=' ~ magento_admin_user,
+          '--admin-password=' ~ magento_admin_password,
+          '--language=' ~ magento_language,
+          '--currency=' ~ magento_currency,
+          '--timezone=' ~ magento_timezone,
+          '--use-rewrites=1'
+        ]
+        + (
+          [
+            '--use-secure=1',
+            '--base-url-secure=' ~ magento_base_url,
+            '--use-secure-admin=1'
+          ] if magento_enable_https | bool else []
+        )
+      }}
+
+- name: Read current Magento secure store configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - config:show
+      - "{{ item.path }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  loop:
+    - key: base_url
+      path: web/unsecure/base_url
+    - key: base_url_secure
+      path: web/secure/base_url
+    - key: use_in_frontend
+      path: web/secure/use_in_frontend
+    - key: use_in_adminhtml
+      path: web/secure/use_in_adminhtml
+  loop_control:
+    label: "{{ item.path }}"
+  register: magento_secure_store_configuration_current
+  changed_when: false
+  when: magento_enable_https | bool
+
+- name: Map current Magento secure store configuration values
+  ansible.builtin.set_fact:
+    magento_secure_store_configuration_values: >-
+      {{
+        magento_secure_store_configuration_values | default({})
+        | combine({item.item.key: item.stdout})
+      }}
+  loop: "{{ magento_secure_store_configuration_current.results }}"
+  when: magento_enable_https | bool
+
+- name: Ensure Magento secure store configuration matches the desired base URL
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - setup:store-config:set
+      - "--base-url={{ magento_base_url }}"
+      - "--base-url-secure={{ magento_base_url }}"
+      - --use-secure=1
+      - --use-secure-admin=1
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_secure_store_configuration_update
+  changed_when: true
+  when:
+    - magento_enable_https | bool
+    - >-
+      magento_secure_store_configuration_values.base_url | default('') != magento_base_url
+      or magento_secure_store_configuration_values.base_url_secure | default('') != magento_base_url
+      or magento_secure_store_configuration_values.use_in_frontend | default('') != '1'
+      or magento_secure_store_configuration_values.use_in_adminhtml | default('') != '1'
+
+- name: Flush Magento cache after secure store configuration changes
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - cache:flush
+  become: true
+  become_user: "{{ magento_app_user }}"
+  changed_when: true
+  when:
+    - magento_enable_https | bool
+    - magento_secure_store_configuration_update is changed
+
+- name: Read current Magento deployment mode
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - deploy:mode:show
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_deploy_mode_current
+  changed_when: false
+
+- name: Extract current Magento deployment mode
+  ansible.builtin.set_fact:
+    magento_current_deploy_mode: >-
+      {{
+        magento_deploy_mode_current.stdout
+        | regex_replace('^Current application mode: ([[:alpha:]]+).*$','\1')
+      }}
+
+- name: Check whether the production build marker exists
+  ansible.builtin.stat:
+    path: "{{ magento_app_root }}/var/.ansible_build_complete"
+  register: magento_production_build_marker
+
+- name: Set Magento deployment mode
+  ansible.builtin.command:
+    argv: "{{ magento_deploy_mode_set_args }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  changed_when: true
+  vars:
+    magento_deploy_mode_set_args: >-
+      {{
+        [
+          magento_app_root ~ '/bin/magento',
+          'deploy:mode:set',
+          magento_deploy_mode
+        ]
+        + (
+          ['--skip-compilation'] if magento_deploy_mode == 'production' else []
+        )
+      }}
+  when: magento_current_deploy_mode != magento_deploy_mode
+
+- name: Remove the production build marker outside production mode
+  ansible.builtin.file:
+    path: "{{ magento_app_root }}/var/.ansible_build_complete"
+    state: absent
+  when:
+    - magento_deploy_mode != 'production'
+    - magento_production_build_marker.stat.exists
+
+- name: Compile Magento dependency injection artifacts
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - setup:di:compile
+  become: true
+  become_user: "{{ magento_app_user }}"
+  changed_when: true
+  when:
+    - magento_run_post_install_build | bool
+    - magento_deploy_mode == 'production'
+    - not magento_production_build_marker.stat.exists or magento_current_deploy_mode != 'production'
+
+- name: Deploy Magento static content
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - setup:static-content:deploy
+      - -f
+      - "{{ magento_locale }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  changed_when: true
+  when:
+    - magento_run_post_install_build | bool
+    - magento_deploy_mode == 'production'
+    - not magento_production_build_marker.stat.exists or magento_current_deploy_mode != 'production'
+
+- name: Record completion of the production build steps
+  ansible.builtin.file:
+    path: "{{ magento_app_root }}/var/.ansible_build_complete"
+    state: touch
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0644"
+  when:
+    - magento_run_post_install_build | bool
+    - magento_deploy_mode == 'production'
+    - not magento_production_build_marker.stat.exists or magento_current_deploy_mode != 'production'
+
+- name: Find Magento configuration paths that are still group writable
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/app/etc"
+      - -perm
+      - /020
+      - -print
+  register: magento_configuration_paths_with_group_write
+  changed_when: false
+
+- name: Remove group write permission from Magento configuration paths
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ magento_app_root }}/app/etc"
+      - -exec
+      - chmod
+      - g-w
+      - "{}"
+      - +
+  changed_when: true
+  when: magento_configuration_paths_with_group_write.stdout | length > 0

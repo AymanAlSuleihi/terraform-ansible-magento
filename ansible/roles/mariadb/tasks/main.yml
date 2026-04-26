@@ -1,0 +1,60 @@
+---
+- name: Install MariaDB server packages
+  ansible.builtin.apt:
+    name:
+      - mariadb-client
+      - mariadb-server
+    state: present
+
+- name: Configure MariaDB for Magento
+  ansible.builtin.template:
+    src: 60-magento.cnf.j2
+    dest: /etc/mysql/mariadb.conf.d/60-magento.cnf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart MariaDB
+
+- name: Ensure MariaDB service is enabled and running
+  ansible.builtin.service:
+    name: mariadb
+    state: started
+    enabled: true
+
+- name: Wait for MariaDB socket
+  ansible.builtin.wait_for:
+    path: /run/mysqld/mysqld.sock
+    timeout: 60
+
+- name: Ensure Magento database exists
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute=CREATE DATABASE IF NOT EXISTS `{{ magento_db_name }}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+  changed_when: false
+
+- name: Ensure Magento database user exists and has the correct password
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute={{ mariadb_user_sql }}"
+  vars:
+    mariadb_user_sql: >-
+      CREATE USER IF NOT EXISTS '{{ magento_db_user }}'@'localhost'
+      IDENTIFIED BY '{{ magento_db_password | replace("'", "''") }}';
+      ALTER USER '{{ magento_db_user }}'@'localhost'
+      IDENTIFIED BY '{{ magento_db_password | replace("'", "''") }}';
+  no_log: true
+  changed_when: false
+
+- name: Ensure Magento database grants are present
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute={{ mariadb_grant_sql }}"
+  vars:
+    mariadb_grant_sql: >-
+      GRANT ALL PRIVILEGES ON `{{ magento_db_name }}`.*
+      TO '{{ magento_db_user }}'@'localhost';
+      FLUSH PRIVILEGES;
+  changed_when: false

@@ -1,0 +1,69 @@
+---
+- name: Provision Magento host
+  hosts: magento_servers
+  become: true
+  gather_facts: true
+  force_handlers: true
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - magento_domain | length > 0
+          - magento_deploy_mode in ['default', 'developer', 'production']
+          - (not magento_enable_https) or magento_letsencrypt_email | length > 0
+          - magento_db_password | length > 0
+          - magento_repo_public_key | length > 0
+          - magento_repo_private_key | length > 0
+          - magento_admin_email | length > 0
+          - magento_admin_password | length > 0
+          - magento_admin_password | lower != magento_admin_user | lower
+          - magento_admin_password is match('^(?=.*[A-Za-z])(?=.*\d).{7,}$')
+          - magento_opensearch_initial_admin_password | length > 0
+          - magento_opensearch_initial_admin_password is match('^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$')
+        fail_msg: >-
+          Populate the required Magento variables in ansible/group_vars/magento_servers.yml
+          or an Ansible Vault file before running this playbook. The Magento
+          deploy mode must be one of default, developer, or production. The Magento
+          admin password must not match the admin username, must be at least 7
+          characters, and must include both letters and digits. The OpenSearch
+          package post-install script also requires magento_opensearch_initial_admin_password
+          to be at least 8 characters and include uppercase, lowercase, digit,
+          and special characters, even if security is disabled later in opensearch.yml.
+
+  roles:
+    - role: common
+    - role: repositories
+    - role: php
+    - role: mariadb
+    - role: opensearch
+
+  tasks:
+    - name: Prepare Magento project files
+      ansible.builtin.include_role:
+        name: magento
+        tasks_from: project
+
+    - name: Render initial nginx configuration
+      ansible.builtin.include_role:
+        name: nginx
+
+    - name: Apply pending handler changes before certificate issuance
+      ansible.builtin.meta: flush_handlers
+
+    - name: Obtain Let's Encrypt certificate
+      ansible.builtin.include_role:
+        name: ssl
+      when: magento_enable_https | bool
+
+    - name: Render final nginx configuration
+      ansible.builtin.include_role:
+        name: nginx
+
+    - name: Apply pending handler changes after final nginx render
+      ansible.builtin.meta: flush_handlers
+
+    - name: Install Magento application
+      ansible.builtin.include_role:
+        name: magento
+        tasks_from: install

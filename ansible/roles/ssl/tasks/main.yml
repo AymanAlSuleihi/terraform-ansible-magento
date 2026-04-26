@@ -1,0 +1,31 @@
+---
+- name: Install certbot packages
+  ansible.builtin.apt:
+    name:
+      - certbot
+    state: present
+
+- name: Ensure certbot renewal timer is enabled
+  ansible.builtin.service:
+    name: certbot.timer
+    state: started
+    enabled: true
+
+- name: Obtain Let's Encrypt certificate with the webroot challenge
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - -w
+      - "{{ magento_acme_webroot }}"
+      - -d
+      - "{{ magento_domain }}"
+      - --email
+      - "{{ magento_letsencrypt_email }}"
+      - --agree-tos
+      - --non-interactive
+      - --keep-until-expiring
+  changed_when: true
+  args:
+    creates: "/etc/letsencrypt/live/{{ magento_domain }}/fullchain.pem"

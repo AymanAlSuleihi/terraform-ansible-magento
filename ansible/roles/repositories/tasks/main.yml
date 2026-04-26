@@ -1,0 +1,59 @@
+---
+- name: Look for existing MariaDB repository configuration
+  ansible.builtin.find:
+    paths: /etc/apt/sources.list.d
+    patterns: "mariadb*"
+    file_type: file
+  register: repositories_mariadb_repo_files
+  when: magento_mariadb_use_vendor_repo | bool
+
+- name: Download MariaDB repository setup script
+  ansible.builtin.get_url:
+    url: https://r.mariadb.com/downloads/mariadb_repo_setup
+    dest: /usr/local/sbin/mariadb_repo_setup
+    mode: "0755"
+  when: magento_mariadb_use_vendor_repo | bool
+
+- name: Configure MariaDB 11.4 repository
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/mariadb_repo_setup
+      - "--mariadb-server-version={{ magento_mariadb_server_version }}"
+      - --skip-maxscale
+  register: repositories_mariadb_repo_setup
+  changed_when: true
+  when:
+    - magento_mariadb_use_vendor_repo | bool
+    - repositories_mariadb_repo_files.matched == 0
+
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install OpenSearch repository key
+  ansible.builtin.get_url:
+    url: https://artifacts.opensearch.org/publickeys/opensearch-release.pgp
+    dest: /etc/apt/keyrings/opensearch.asc
+    owner: root
+    group: root
+    mode: "0644"
+  register: repositories_opensearch_key
+
+- name: Configure OpenSearch apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/opensearch.asc] https://artifacts.opensearch.org/releases/bundle/opensearch/3.x/apt stable main"
+    filename: opensearch-3.x
+    state: present
+  register: repositories_opensearch_repo
+
+- name: Refresh apt cache after repository changes
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - (magento_mariadb_use_vendor_repo | bool and repositories_mariadb_repo_setup is changed)
+      or repositories_opensearch_key is changed
+      or repositories_opensearch_repo is changed

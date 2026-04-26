@@ -1,0 +1,32 @@
+---
+- name: Install OpenSearch package
+  ansible.builtin.apt:
+    name: "{{ magento_opensearch_package }}"
+    state: present
+  environment:
+    OPENSEARCH_INITIAL_ADMIN_PASSWORD: "{{ magento_opensearch_initial_admin_password }}"
+  no_log: true
+
+- name: Configure OpenSearch node
+  ansible.builtin.template:
+    src: opensearch.yml.j2
+    dest: /etc/opensearch/opensearch.yml
+    owner: root
+    group: opensearch
+    mode: "0660"
+  notify: Restart OpenSearch
+
+- name: Configure OpenSearch JVM heap
+  ansible.builtin.template:
+    src: 99-magento.options.j2
+    dest: /etc/opensearch/jvm.options.d/99-magento.options
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart OpenSearch
+
+- name: Ensure OpenSearch service is enabled and running
+  ansible.builtin.service:
+    name: opensearch
+    state: started
+    enabled: true
