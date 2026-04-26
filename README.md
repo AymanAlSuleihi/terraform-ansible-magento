@@ -215,6 +215,13 @@ ansible-lint playbooks/site.yml
 ansible-playbook --syntax-check playbooks/site.yml
 ```
 
+## Security Patches
+
+Much appreciation to `hryvinskyi` for the following security patches:
+
+- [Fix File Custom Option Processing via REST/SOAP API](https://gist.github.com/hryvinskyi/5557bd641d8f61005d68202c66cf228e)
+- [CVE-2025-54236 (SessionReaper) Security Patch](https://gist.github.com/hryvinskyi/16fbc40f3eb00986d7c9673543961c71)
+
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request with improvements, bug fixes, or additional features.
