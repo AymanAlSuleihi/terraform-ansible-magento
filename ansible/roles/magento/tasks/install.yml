@@ -239,3 +239,72 @@
       - +
   changed_when: true
   when: magento_configuration_paths_with_group_write.stdout | length > 0
+
+- name: Read Magento admin URI
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - info:adminuri
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_admin_uri_raw
+  changed_when: false
+
+- name: Build Magento install summary facts
+  ansible.builtin.set_fact:
+    magento_admin_uri_path: >-
+      {{
+        magento_admin_uri_raw.stdout
+        | trim
+        | regex_replace('^Admin URI:\s*', '')
+      }}
+    magento_admin_url: >-
+      {{
+        (magento_base_url | regex_replace('/+$', ''))
+        ~ (
+          magento_admin_uri_raw.stdout
+          | trim
+          | regex_replace('^Admin URI:\s*', '')
+        )
+      }}
+    magento_remote_install_summary_path: "{{ magento_app_root }}/var/ansible-install-summary.yml"
+    magento_local_install_summary_dir: "{{ playbook_dir | dirname }}/artifacts"
+    magento_local_install_summary_path: >-
+      {{
+        (playbook_dir | dirname)
+        ~ '/artifacts/'
+        ~ inventory_hostname
+        ~ '-magento-install-summary.yml'
+      }}
+
+- name: Write Magento install summary on the server
+  ansible.builtin.template:
+    src: install-summary.yml.j2
+    dest: "{{ magento_remote_install_summary_path }}"
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0640"
+
+- name: Ensure local Magento summary artifact directory exists
+  ansible.builtin.file:
+    path: "{{ magento_local_install_summary_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Write local Magento install summary artifact
+  ansible.builtin.template:
+    src: install-summary.yml.j2
+    dest: "{{ magento_local_install_summary_path }}"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: Show Magento install summary locations
+  ansible.builtin.debug:
+    msg:
+      - "Magento admin URL: {{ magento_admin_url }}"
+      - "Magento admin URI path: {{ magento_admin_uri_path }}"
+      - "Remote install summary: {{ magento_remote_install_summary_path }}"
+      - "Local install summary: {{ magento_local_install_summary_path }}"
