@@ -41,6 +41,304 @@
   args:
     creates: "{{ magento_app_root }}/bin/magento"
 
+- name: Initialize desired Magento composer patch map
+  ansible.builtin.set_fact:
+    magento_expected_composer_patches: {}
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Build desired Magento composer patch map
+  ansible.builtin.set_fact:
+    magento_expected_composer_patches: >-
+      {{
+        magento_expected_composer_patches
+        | combine({item.package: {item.description: item.path}}, recursive=True)
+      }}
+  loop: "{{ magento_patches }}"
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Ensure Magento patch directories exist
+  ansible.builtin.file:
+    path: "{{ magento_app_root }}/{{ item }}"
+    state: directory
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0755"
+  loop: "{{ magento_patches | map(attribute='path') | map('dirname') | unique }}"
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Download Magento patch files
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ magento_app_root }}/{{ item.path }}"
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0644"
+  loop: "{{ magento_patches }}"
+  register: magento_patch_files_download
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Ensure Composer allows the Magento patches plugin
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - >-
+        $path = 'composer.json';
+        $composer = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+        if (!isset($composer['config']) || !is_array($composer['config'])) { $composer['config'] = []; }
+        if (!isset($composer['config']['allow-plugins']) || !is_array($composer['config']['allow-plugins'])) { $composer['config']['allow-plugins'] = []; }
+        if (($composer['config']['allow-plugins']['cweagans/composer-patches'] ?? null) === true) { exit(0); }
+        $composer['config']['allow-plugins']['cweagans/composer-patches'] = true;
+        file_put_contents($path, json_encode($composer, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . PHP_EOL);
+        exit(2);
+  args:
+    chdir: "{{ magento_app_root }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_allow_plugins_update
+  changed_when: magento_composer_allow_plugins_update.rc == 2
+  failed_when: magento_composer_allow_plugins_update.rc not in [0, 2]
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Check whether Composer patches plugin is installed
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - show
+      - --no-interaction
+      - --format=json
+      - cweagans/composer-patches
+  args:
+    chdir: "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_patches_plugin_status
+  changed_when: false
+  failed_when: false
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Extract installed Composer patches plugin version
+  ansible.builtin.set_fact:
+    magento_composer_patches_plugin_installed_version: >-
+      {{
+        (magento_composer_patches_plugin_status.rc == 0)
+        | ternary(
+            ((magento_composer_patches_plugin_status.stdout | from_json).versions | default([]) | first | default('')),
+            ''
+          )
+      }}
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Install Composer patches plugin
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - require
+      - --no-interaction
+      - "cweagans/composer-patches:{{ magento_composer_patches_version }}"
+  args:
+    chdir: "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_patches_plugin_require
+  changed_when: true
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+    - >-
+      magento_composer_patches_plugin_status.rc != 0
+      or not (magento_composer_patches_plugin_installed_version is match('^2\.'))
+
+- name: Ensure Magento composer patch definitions are present
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - >-
+        $path = 'composer.json';
+        $composer = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+        $desired = json_decode($argv[1], true, 512, JSON_THROW_ON_ERROR);
+        if (!isset($composer['extra']) || !is_array($composer['extra'])) { $composer['extra'] = []; }
+        if (!isset($composer['extra']['patches']) || !is_array($composer['extra']['patches'])) { $composer['extra']['patches'] = []; }
+        $changed = false;
+        foreach ($desired as $package => $patches) {
+          if (
+            !isset($composer['extra']['patches'][$package])
+            || !is_array($composer['extra']['patches'][$package])
+          ) {
+            $composer['extra']['patches'][$package] = [];
+          }
+          foreach ($patches as $description => $patchPath) {
+            if (($composer['extra']['patches'][$package][$description] ?? null) !== $patchPath) {
+              $composer['extra']['patches'][$package][$description] = $patchPath;
+              $changed = true;
+            }
+          }
+        }
+        if (!$changed) { exit(0); }
+        file_put_contents($path, json_encode($composer, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . PHP_EOL);
+        exit(2);
+      - "{{ magento_expected_composer_patches | to_json }}"
+  args:
+    chdir: "{{ magento_app_root }}"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_patch_definitions_update
+  changed_when: magento_composer_patch_definitions_update.rc == 2
+  failed_when: magento_composer_patch_definitions_update.rc not in [0, 2]
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Check whether Magento patch lock file exists
+  ansible.builtin.stat:
+    path: "{{ magento_app_root }}/patches.lock.json"
+  register: magento_patches_lock_file
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Check whether the file option API patch is present
+  ansible.builtin.stat:
+    path: "{{ magento_app_root }}/vendor/magento/framework/Api/ImageContentUploaderInterface.php"
+  register: magento_file_option_patch_indicator
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Check whether the quote validator patch is present
+  ansible.builtin.stat:
+    path: "{{ magento_app_root }}/vendor/magento/module-quote/Model/Quote/Item/CartItemValidatorChain.php"
+  register: magento_quote_patch_indicator
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Check whether the SessionReaper patch is present
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -q
+      - validateAndFilterUploadedFiles
+      - "{{ magento_app_root }}/vendor/magento/module-customer/Controller/Address/File/Upload.php"
+  register: magento_sessionreaper_patch_indicator
+  changed_when: false
+  failed_when: false
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Determine whether Magento patches need to be applied
+  ansible.builtin.set_fact:
+    magento_patch_apply_required: >-
+      {{
+        (magento_composer_allow_plugins_update is changed)
+        or (magento_composer_patches_plugin_require is changed)
+        or (magento_composer_patch_definitions_update is changed)
+        or (magento_patch_files_download is changed)
+        or not (magento_patches_lock_file.stat.exists | default(false))
+        or not (magento_file_option_patch_indicator.stat.exists | default(false))
+        or not (magento_quote_patch_indicator.stat.exists | default(false))
+        or (magento_sessionreaper_patch_indicator.rc | default(1)) != 0
+      }}
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
+- name: Refresh Magento patch lock data
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - patches-relock
+      - --no-interaction
+  args:
+    chdir: "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_patches_relock
+  changed_when: true
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+    - magento_patch_apply_required | default(false)
+
+- name: Reapply Magento composer patches
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - patches-repatch
+      - --no-interaction
+  args:
+    chdir: "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_patches_repatch
+  changed_when: true
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+    - magento_patch_apply_required | default(false)
+
+- name: Refresh Composer lock metadata after patch definition changes
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/composer
+      - update
+      - --lock
+      - --no-interaction
+  args:
+    chdir: "{{ magento_app_root }}"
+  environment:
+    COMPOSER_HOME: "{{ magento_composer_home }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_composer_lock_metadata_refresh
+  changed_when: true
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+    - >-
+      magento_composer_allow_plugins_update is changed
+      or magento_composer_patch_definitions_update is changed
+
+- name: Record whether Magento patches were reapplied
+  ansible.builtin.set_fact:
+    magento_patches_reapplied: >-
+      {{
+        (magento_composer_patches_repatch is defined)
+        and (magento_composer_patches_repatch is changed)
+      }}
+  when:
+    - magento_patches_enabled | bool
+    - magento_patches | length > 0
+
 - name: Ensure Magento files have the expected ownership
   ansible.builtin.file:
     path: "{{ magento_app_root }}"
