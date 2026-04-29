@@ -9,6 +9,17 @@
     name: "{{ magento_common_packages }}"
     state: present
 
+- name: Ensure cron package is installed
+  ansible.builtin.apt:
+    name: cron
+    state: present
+
+- name: Ensure cron service is enabled and running
+  ansible.builtin.service:
+    name: cron
+    state: started
+    enabled: true
+
 - name: Ensure swap file exists
   ansible.builtin.command:
     argv:

@@ -216,6 +216,35 @@
   changed_when: true
   when: magento_patches_reapplied | default(false)
 
+- name: Read current Magento crontab
+  ansible.builtin.command:
+    argv:
+      - crontab
+      - -l
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_current_crontab
+  changed_when: false
+  failed_when: magento_current_crontab.rc not in [0, 1]
+
+- name: Ensure Magento cron jobs are installed
+  ansible.builtin.command:
+    argv:
+      - "{{ magento_app_root }}/bin/magento"
+      - cron:install
+      - --force
+  become: true
+  become_user: "{{ magento_app_user }}"
+  register: magento_cron_install
+  changed_when: true
+  when:
+    - magento_current_crontab.rc != 0
+      or '#~ MAGENTO START' not in magento_current_crontab.stdout
+      or '#~ MAGENTO END' not in magento_current_crontab.stdout
+      or magento_app_root not in magento_current_crontab.stdout
+      or 'update/cron.php' in magento_current_crontab.stdout
+      or 'setup:cron:run' in magento_current_crontab.stdout
+
 - name: Find Magento configuration paths that are still group writable
   ansible.builtin.command:
     argv:
