@@ -15,5 +15,7 @@ server {
         try_files $uri =404;
     }
 
+    include /etc/nginx/snippets/phpmyadmin.conf;
+
     include {{ magento_app_root }}/nginx.conf;
 }

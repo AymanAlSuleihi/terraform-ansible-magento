@@ -2,9 +2,11 @@
 
 Provision a Magento Open Source 2.4.8-p4 environment on Hetzner Cloud using Terraform for infrastructure lifecycle management and Ansible for host, service, and application configuration.
 
-It delivers a single-server Magento environment with all prerequisites installed and configured, including server configuration, LEMP stack installation, TLS certificate issuance, Magento installation, and patch application.
+It delivers a single-server Magento environment with all prerequisites installed and configured, including server configuration, LEMP stack installation, phpMyAdmin, TLS certificate issuance, Magento installation, and patch application.
 
-This environment is intended for quickly provisioning a Magento host for testing, development, and learning purposes. And with further adjustment, it serves as a solid foundation for single-server production deployment.
+This environment is intended for quickly provisioning a Magento host for testing, development, and learning purposes. And with further considerations and adjustments, it serves as a solid foundation for single-server production deployment.
+
+As this repo is primarily intended for development and testing purposes, phpMyAdmin is included for convenience. It should be noted that while the included configuration takes some security precautions, exposing database administration publicly is not recommended for production systems and should be disabled in production environments.
 
 ## Overview
 
@@ -12,7 +14,7 @@ The repository delivers the following workflow:
 
 1. Terraform provisions a Hetzner Cloud server and applies first-boot SSH hardening.
 2. `scripts/render_inventory.sh` converts Terraform outputs into the live Ansible inventory.
-3. Ansible configures the operating system, installs the Magento runtime, issues TLS certificates, installs Magento, and applies patches for recent vulnerabilities.
+3. Ansible configures the operating system, installs the Magento runtime, installs phpMyAdmin, issues TLS certificates, installs Magento, and applies patches for recent vulnerabilities.
 4. The playbook returns a post-install summary artifact containing the generated Magento admin URI and other access details.
 
 ## Scope
@@ -20,10 +22,11 @@ The repository delivers the following workflow:
 - Single `hcloud_server` on Hetzner Cloud
 - Ubuntu 24.04 base image
 - SSH hardening with a non-root administrative user
-- fail2ban, unattended-upgrades, swap, and UFW
+- Fail2Ban, unattended-upgrades, swap, and UFW
 - nginx, PHP 8.3, MariaDB 11.4, and OpenSearch 3
 - Let's Encrypt certificate issuance via webroot challenge
 - Magento Open Source 2.4.8-p4 installation via Composer
+- phpMyAdmin behind a custom HTTPS path protected with nginx basic auth
 - Magento patch application using `cweagans/composer-patches` and backported security patches for recent CVEs by `hryvinskyi`
 
 ## Technology Stack
@@ -35,8 +38,8 @@ The repository delivers the following workflow:
 
 ### Server and services
 
-- Ubuntu 24.04 base image
-- Fail2ban
+- Ubuntu 24.04
+- Fail2Ban
 - Unattended-upgrades
 
 ### Application stack
@@ -45,6 +48,7 @@ The repository delivers the following workflow:
 - Composer 2.9.3
 - OpenSearch 3
 - MariaDB 11.4
+- phpMyAdmin 5.2.1
 - PHP 8.3
 - nginx 1.24
 
@@ -92,7 +96,7 @@ export HCLOUD_TOKEN="your-token-here"
 
    It is recommended to replace example username `magento` with your own secure username.
 
-3. Initialize and apply the Terraform configuration.
+3. Initialise and apply the Terraform configuration.
 
    ```bash
    cd terraform
@@ -128,8 +132,13 @@ export HCLOUD_TOKEN="your-token-here"
    - `magento_admin_email`
    - `magento_admin_password`
    - `magento_opensearch_initial_admin_password`
+   - `magento_phpmyadmin_uri_path`
+   - `magento_phpmyadmin_basic_auth_user`
+   - `magento_phpmyadmin_basic_auth_password`
+   - `magento_phpmyadmin_config_storage_password`
 
    As with Terraform variables, it is recommended to replace example username values such as `admin` and `magento` with your own secure usernames.
+   The phpMyAdmin configuration storage database and control user default to `phpmyadmin` and `pma`; only the control-user password must be supplied unless you need different names.
 
 7. Run the Ansible playbook.
 
@@ -138,7 +147,7 @@ export HCLOUD_TOKEN="your-token-here"
    ansible-playbook playbooks/site.yml
    ```
 
-8. Inspect the generated install summary for the Magento admin URI and other access details.
+8. Inspect the generated install summary for the Magento admin URI, protected phpMyAdmin URL, and other access details.
 
    Local artifact:
 
@@ -199,7 +208,7 @@ This repository generates several environment-specific files during normal opera
 - `ansible/artifacts/<inventory_hostname>-magento-install-summary.yml`: Local playbook artifact containing Magento access details.
 - `/var/www/magento/var/ansible-install-summary.yml`: Remote install summary written on the server by default.
 
-The install summary includes the resolved admin URI, full admin URL, deployment mode, and selected host/application metadata.
+The install summary includes the resolved admin URI, full admin URL, the protected phpMyAdmin URL and basic auth username, deployment mode, and selected host/application metadata.
 
 ## Validation
 

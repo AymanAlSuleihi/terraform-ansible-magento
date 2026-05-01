@@ -1,0 +1,40 @@
+{% set magento_phpmyadmin_uri_prefix = magento_phpmyadmin_uri_path | regex_replace('/$', '') %}
+
+location = {{ magento_phpmyadmin_uri_prefix }} {
+    return 301 $scheme://$host{{ magento_phpmyadmin_uri_path }};
+}
+
+{% if magento_phpmyadmin_uri_path != '/phpmyadmin/' %}
+location ^~ /phpmyadmin/ {
+    return 404;
+}
+{% endif %}
+
+location ^~ {{ magento_phpmyadmin_uri_path }}setup/ {
+    return 404;
+}
+
+location ~ ^{{ magento_phpmyadmin_uri_path }}(?<phpmyadmin_script>.+\.php)$ {
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/phpmyadmin.htpasswd;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+    root /usr/share;
+    try_files /phpmyadmin/$phpmyadmin_script =404;
+    fastcgi_pass fastcgi_backend;
+    fastcgi_index index.php;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME /usr/share/phpmyadmin/$phpmyadmin_script;
+    fastcgi_param SCRIPT_NAME {{ magento_phpmyadmin_uri_prefix }}/$phpmyadmin_script;
+    fastcgi_param PHP_SELF {{ magento_phpmyadmin_uri_prefix }}/$phpmyadmin_script;
+    fastcgi_param DOCUMENT_URI {{ magento_phpmyadmin_uri_prefix }}/$phpmyadmin_script;
+    fastcgi_param HTTPS $https if_not_empty;
+}
+
+location {{ magento_phpmyadmin_uri_path }} {
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/phpmyadmin.htpasswd;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+    alias /usr/share/phpmyadmin/;
+    index index.php;
+    try_files $uri $uri/ {{ magento_phpmyadmin_uri_path }}index.php$is_args$args;
+}

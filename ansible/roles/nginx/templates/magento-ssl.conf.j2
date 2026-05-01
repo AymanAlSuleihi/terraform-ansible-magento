@@ -34,5 +34,7 @@ server {
     ssl_prefer_server_ciphers off;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    include /etc/nginx/snippets/phpmyadmin.conf;
+
     include {{ magento_app_root }}/nginx.conf;
 }

@@ -1,0 +1,137 @@
+---
+- name: Prevent phpMyAdmin package from auto-configuring a web server
+  ansible.builtin.debconf:
+    name: phpmyadmin
+    question: phpmyadmin/reconfigure-webserver
+    value: ""
+    vtype: multiselect
+
+- name: Prevent phpMyAdmin package from auto-configuring a database
+  ansible.builtin.debconf:
+    name: phpmyadmin
+    question: phpmyadmin/dbconfig-install
+    value: "false"
+    vtype: boolean
+
+- name: Install phpMyAdmin package
+  ansible.builtin.apt:
+    name:
+      - apache2-utils
+      - phpmyadmin
+    state: present
+
+- name: Ensure phpMyAdmin temporary directory exists
+  ansible.builtin.file:
+    path: /var/lib/phpmyadmin/tmp
+    state: directory
+    owner: "{{ magento_app_user }}"
+    group: "{{ magento_app_group }}"
+    mode: "0700"
+
+- name: Ensure phpMyAdmin configuration storage database exists
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute=CREATE DATABASE IF NOT EXISTS `{{ magento_phpmyadmin_config_storage_database }}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+  changed_when: false
+
+- name: Ensure phpMyAdmin configuration storage user exists and has the correct password
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute={{ phpmyadmin_config_storage_user_sql }}"
+  vars:
+    phpmyadmin_config_storage_user_sql: >-
+      CREATE USER IF NOT EXISTS '{{ magento_phpmyadmin_config_storage_user }}'@'localhost'
+      IDENTIFIED BY '{{ magento_phpmyadmin_config_storage_password | replace("'", "''") }}';
+      ALTER USER '{{ magento_phpmyadmin_config_storage_user }}'@'localhost'
+      IDENTIFIED BY '{{ magento_phpmyadmin_config_storage_password | replace("'", "''") }}';
+  no_log: true
+  changed_when: false
+
+- name: Ensure phpMyAdmin configuration storage grants are present
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - "--execute={{ phpmyadmin_config_storage_grant_sql }}"
+  vars:
+    phpmyadmin_config_storage_grant_sql: >-
+      GRANT SELECT, INSERT, UPDATE, DELETE ON `{{ magento_phpmyadmin_config_storage_database }}`.*
+      TO '{{ magento_phpmyadmin_config_storage_user }}'@'localhost';
+      FLUSH PRIVILEGES;
+  changed_when: false
+
+- name: Check whether phpMyAdmin configuration storage tables are initialized
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --skip-column-names
+      - --batch
+      - "--execute={{ phpmyadmin_config_storage_check_sql }}"
+  vars:
+    phpmyadmin_config_storage_check_sql: >-
+      SELECT COUNT(*)
+      FROM information_schema.tables
+      WHERE table_schema = '{{ magento_phpmyadmin_config_storage_database }}'
+      AND table_name = 'pma__export_templates'
+  register: phpmyadmin_config_storage_check
+  changed_when: false
+
+- name: Import phpMyAdmin configuration storage tables
+  ansible.builtin.shell: >-
+    mariadb {{ magento_phpmyadmin_config_storage_database | quote }}
+    < /usr/share/phpmyadmin/sql/create_tables.sql
+  when: phpmyadmin_config_storage_check.stdout | trim | int == 0
+  changed_when: true
+
+- name: Check whether phpMyAdmin basic auth credentials are current
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -vb
+      - /etc/nginx/phpmyadmin.htpasswd
+      - "{{ magento_phpmyadmin_basic_auth_user }}"
+      - "{{ magento_phpmyadmin_basic_auth_password }}"
+  register: phpmyadmin_basic_auth_status
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Install phpMyAdmin basic auth credentials
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -bcB
+      - /etc/nginx/phpmyadmin.htpasswd
+      - "{{ magento_phpmyadmin_basic_auth_user }}"
+      - "{{ magento_phpmyadmin_basic_auth_password }}"
+  changed_when: true
+  when: phpmyadmin_basic_auth_status.rc != 0
+  no_log: true
+  notify: Reload nginx
+
+- name: Ensure phpMyAdmin basic auth file permissions are restrictive
+  ansible.builtin.file:
+    path: /etc/nginx/phpmyadmin.htpasswd
+    owner: root
+    group: "{{ magento_app_group }}"
+    mode: "0640"
+  notify: Reload nginx
+
+- name: Configure phpMyAdmin for the Magento host
+  ansible.builtin.template:
+    src: 99-magento.php.j2
+    dest: /etc/phpmyadmin/conf.d/99-magento.php
+    owner: root
+    group: "{{ magento_app_group }}"
+    mode: "0640"
+  notify: Restart PHP-FPM
+
+- name: Install phpMyAdmin nginx snippet
+  ansible.builtin.template:
+    src: phpmyadmin-nginx.conf.j2
+    dest: /etc/nginx/snippets/phpmyadmin.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx

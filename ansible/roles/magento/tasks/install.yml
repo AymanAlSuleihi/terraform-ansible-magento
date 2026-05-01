@@ -293,6 +293,11 @@
           | regex_replace('^Admin URI:\s*', '')
         )
       }}
+    magento_phpmyadmin_url: >-
+      {{
+        (magento_base_url | regex_replace('/+$', ''))
+        ~ magento_phpmyadmin_uri_path
+      }}
     magento_remote_install_summary_path: "{{ magento_app_root }}/var/ansible-install-summary.yml"
     magento_local_install_summary_dir: "{{ playbook_dir | dirname }}/artifacts"
     magento_local_install_summary_path: >-
@@ -331,6 +336,8 @@
   ansible.builtin.debug:
     msg:
       - "Magento admin URL: {{ magento_admin_url }}"
+      - "phpMyAdmin URL: {{ magento_phpmyadmin_url }}"
+      - "phpMyAdmin basic auth user: {{ magento_phpmyadmin_basic_auth_user }}"
       - "Magento admin URI path: {{ magento_admin_uri_path }}"
       - "Remote install summary: {{ magento_remote_install_summary_path }}"
       - "Local install summary: {{ magento_local_install_summary_path }}"

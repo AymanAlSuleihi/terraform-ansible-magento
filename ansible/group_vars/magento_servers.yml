@@ -32,7 +32,12 @@ magento_admin_email: ""
 magento_admin_user: "admin"
 magento_admin_password: ""
 magento_deploy_mode: "developer"
-magento_run_post_install_build: true
+magento_phpmyadmin_uri_path: "/replace-with-random-slug/"
+magento_phpmyadmin_basic_auth_user: "pmaops"
+magento_phpmyadmin_basic_auth_password: ""
+magento_phpmyadmin_config_storage_database: "phpmyadmin"
+magento_phpmyadmin_config_storage_user: "pma"
+magento_phpmyadmin_config_storage_password: ""
 
 magento_repo_public_key: ""
 magento_repo_private_key: ""

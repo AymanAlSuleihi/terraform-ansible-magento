@@ -21,6 +21,12 @@
           - magento_admin_password is match('^(?=.*[A-Za-z])(?=.*\d).{7,}$')
           - magento_opensearch_initial_admin_password | length > 0
           - magento_opensearch_initial_admin_password is match('^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$')
+          - magento_phpmyadmin_uri_path is match('^/[A-Za-z0-9_-]+/$')
+          - magento_phpmyadmin_basic_auth_user is match('^[A-Za-z0-9._-]+$')
+          - magento_phpmyadmin_basic_auth_password | length >= 16
+          - magento_phpmyadmin_config_storage_database is match('^[A-Za-z0-9_]+$')
+          - magento_phpmyadmin_config_storage_user is match('^[A-Za-z0-9._-]+$')
+          - magento_phpmyadmin_config_storage_password | length >= 16
         fail_msg: >-
           Populate the required Magento variables in ansible/group_vars/magento_servers.yml
           or an Ansible Vault file before running this playbook. The Magento
@@ -30,12 +36,16 @@
           package post-install script also requires magento_opensearch_initial_admin_password
           to be at least 8 characters and include uppercase, lowercase, digit,
           and special characters, even if security is disabled later in opensearch.yml.
+          phpMyAdmin also requires a random hidden URI path such as /db-console-rotate-me/,
+          a safe basic auth username, a basic auth password with at least 16 characters,
+          and a configuration storage password with at least 16 characters.
 
   roles:
     - role: common
     - role: repositories
     - role: php
     - role: mariadb
+    - role: phpmyadmin
     - role: opensearch
 
   tasks:
