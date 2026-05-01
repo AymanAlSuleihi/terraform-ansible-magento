@@ -123,13 +123,14 @@
     magento_current_deploy_mode: >-
       {{
         magento_deploy_mode_current.stdout
-        | regex_replace('^Current application mode: ([[:alpha:]]+).*$','\1')
+        | trim
+        | regex_replace('^Current application mode: ([A-Za-z]+).*$','\1')
       }}
 
-- name: Check whether the production build marker exists
+- name: Check whether the post-install build marker exists
   ansible.builtin.stat:
     path: "{{ magento_app_root }}/var/.ansible_build_complete"
-  register: magento_production_build_marker
+  register: magento_post_install_build_marker
 
 - name: Set Magento deployment mode
   ansible.builtin.command:
@@ -151,13 +152,14 @@
       }}
   when: magento_current_deploy_mode != magento_deploy_mode
 
-- name: Remove the production build marker outside production mode
-  ansible.builtin.file:
-    path: "{{ magento_app_root }}/var/.ansible_build_complete"
-    state: absent
-  when:
-    - magento_deploy_mode != 'production'
-    - magento_production_build_marker.stat.exists
+- name: Determine whether Magento build steps are required
+  ansible.builtin.set_fact:
+    magento_post_install_build_required: >-
+      {{
+        not magento_post_install_build_marker.stat.exists
+        or magento_current_deploy_mode != magento_deploy_mode
+        or (magento_patches_reapplied | default(false))
+      }}
 
 - name: Compile Magento dependency injection artifacts
   ansible.builtin.command:
@@ -169,32 +171,28 @@
   changed_when: true
   when:
     - magento_deploy_mode == 'production'
-    - >-
-      (
-        magento_run_post_install_build | bool
-        and (
-          not magento_production_build_marker.stat.exists
-          or magento_current_deploy_mode != 'production'
-        )
-      )
-      or (magento_patches_reapplied | default(false))
+    - magento_post_install_build_required
 
 - name: Deploy Magento static content
   ansible.builtin.command:
-    argv:
-      - "{{ magento_app_root }}/bin/magento"
-      - setup:static-content:deploy
-      - -f
-      - "{{ magento_locale }}"
+    argv: >-
+      {{
+        [
+          magento_app_root ~ '/bin/magento',
+          'setup:static-content:deploy',
+          magento_locale
+        ]
+        + (
+          ['--force'] if magento_deploy_mode != 'production' else []
+        )
+      }}
   become: true
   become_user: "{{ magento_app_user }}"
+  register: magento_static_content_deploy
   changed_when: true
-  when:
-    - magento_run_post_install_build | bool
-    - magento_deploy_mode == 'production'
-    - not magento_production_build_marker.stat.exists or magento_current_deploy_mode != 'production'
+  when: magento_post_install_build_required
 
-- name: Record completion of the production build steps
+- name: Record completion of the post-install build steps
   ansible.builtin.file:
     path: "{{ magento_app_root }}/var/.ansible_build_complete"
     state: touch
@@ -202,9 +200,8 @@
     group: "{{ magento_app_group }}"
     mode: "0644"
   when:
-    - magento_run_post_install_build | bool
-    - magento_deploy_mode == 'production'
-    - not magento_production_build_marker.stat.exists or magento_current_deploy_mode != 'production'
+    - magento_static_content_deploy is defined
+    - magento_static_content_deploy is changed
 
 - name: Flush Magento cache after patch updates
   ansible.builtin.command:
