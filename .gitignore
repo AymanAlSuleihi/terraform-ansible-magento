@@ -14,3 +14,9 @@ override.tf.json
 *.retry
 .vault_pass.txt
 ansible/artifacts/
+ansible/inventory.yml
+ansible/vars/magento-deploy.yml
+ansible/vars/magento-deploy.generated.yml
+terraform/backend.hcl
+terraform/backend_override.tf
+terraform/terraform.github.auto.tfvars

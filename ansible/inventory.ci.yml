@@ -1,0 +1,8 @@
+all:
+  children:
+    magento_servers:
+      hosts:
+        magento-node-ci:
+          ansible_host: 203.0.113.10
+          ansible_user: magento
+          ansible_become: true

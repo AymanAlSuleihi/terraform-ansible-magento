@@ -6,6 +6,26 @@
   force_handlers: true
 
   pre_tasks:
+    - name: Check whether local Magento deploy vars exist
+      ansible.builtin.stat:
+        path: "{{ playbook_dir | dirname }}/vars/magento-deploy.yml"
+      register: magento_local_deploy_vars
+
+    - name: Load local Magento deploy vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir | dirname }}/vars/magento-deploy.yml"
+      when: magento_local_deploy_vars.stat.exists
+
+    - name: Check whether generated Magento deploy vars exist
+      ansible.builtin.stat:
+        path: "{{ playbook_dir | dirname }}/vars/magento-deploy.generated.yml"
+      register: magento_generated_deploy_vars
+
+    - name: Load generated Magento deploy vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir | dirname }}/vars/magento-deploy.generated.yml"
+      when: magento_generated_deploy_vars.stat.exists
+
     - name: Validate required variables
       ansible.builtin.assert:
         that:
@@ -28,9 +48,10 @@
           - magento_phpmyadmin_config_storage_user is match('^[A-Za-z0-9._-]+$')
           - magento_phpmyadmin_config_storage_password | length >= 16
         fail_msg: >-
-          Populate the required Magento variables in ansible/group_vars/magento_servers.yml
-          or an Ansible Vault file before running this playbook. The Magento
-          deploy mode must be one of default, developer, or production. The Magento
+          Populate the required Magento variables in ansible/vars/magento-deploy.yml,
+          ansible/vars/magento-deploy.generated.yml, ansible/group_vars/magento_servers.yml,
+          or an Ansible Vault file before running this playbook. The Magento deploy
+          mode must be one of default, developer, or production. The Magento
           admin password must not match the admin username, must be at least 7
           characters, and must include both letters and digits. The OpenSearch
           package post-install script also requires magento_opensearch_initial_admin_password

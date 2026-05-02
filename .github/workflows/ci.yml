@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+
+      - name: Initialize Terraform without backend
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Check Terraform formatting
+        run: terraform -chdir=terraform fmt -check -diff
+
+      - name: Validate Terraform configuration
+        run: terraform -chdir=terraform validate
+
+  ansible:
+    name: Ansible Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Prepare CI deploy vars
+        run: cp ansible/vars/magento-deploy.ci.yml ansible/vars/magento-deploy.generated.yml
+
+      - name: Lint Ansible playbook
+        working-directory: ansible
+        run: uvx --from=ansible-lint ansible-lint playbooks/site.yml
+
+      - name: Syntax-check Ansible playbook
+        working-directory: ansible
+        run: uvx --from=ansible-core ansible-playbook -i inventory.ci.yml playbooks/site.yml --syntax-check

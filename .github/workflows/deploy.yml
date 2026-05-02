@@ -1,0 +1,160 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.TF_BACKEND_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_BACKEND_AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.TF_BACKEND_AWS_SESSION_TOKEN }}
+
+jobs:
+  validate:
+    name: Validate Deployment Inputs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate required deployment secrets
+        env:
+          TF_BACKEND_HCL: ${{ secrets.TF_BACKEND_HCL }}
+          TERRAFORM_TFVARS_HCL: ${{ secrets.TERRAFORM_TFVARS_HCL }}
+          ANSIBLE_DEPLOY_VARS_YAML: ${{ secrets.ANSIBLE_DEPLOY_VARS_YAML }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            HCLOUD_TOKEN
+            TF_BACKEND_AWS_ACCESS_KEY_ID
+            TF_BACKEND_AWS_SECRET_ACCESS_KEY
+            TF_BACKEND_HCL
+            TERRAFORM_TFVARS_HCL
+            ANSIBLE_DEPLOY_VARS_YAML
+          )
+
+          missing=()
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required deployment secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Render deployment files
+        env:
+          TF_BACKEND_HCL: ${{ secrets.TF_BACKEND_HCL }}
+          TERRAFORM_TFVARS_HCL: ${{ secrets.TERRAFORM_TFVARS_HCL }}
+          ANSIBLE_DEPLOY_VARS_YAML: ${{ secrets.ANSIBLE_DEPLOY_VARS_YAML }}
+        run: |
+          set -euo pipefail
+          mkdir -p ansible/vars
+          cat > terraform/backend_override.tf <<'EOF'
+          terraform {
+            backend "s3" {}
+          }
+          EOF
+          printf '%s\n' "$TF_BACKEND_HCL" > terraform/backend.hcl
+          printf '%s\n' "$TERRAFORM_TFVARS_HCL" > terraform/terraform.github.auto.tfvars
+          printf '%s\n' "$ANSIBLE_DEPLOY_VARS_YAML" > ansible/vars/magento-deploy.generated.yml
+
+      - name: Initialize Terraform backend
+        run: terraform -chdir=terraform init -backend-config=backend.hcl
+
+      - name: Check Terraform formatting
+        run: terraform -chdir=terraform fmt -check -diff
+
+      - name: Validate Terraform configuration
+        run: terraform -chdir=terraform validate
+
+      - name: Lint Ansible playbook
+        working-directory: ansible
+        run: uvx --from=ansible-lint ansible-lint playbooks/site.yml
+
+      - name: Syntax-check Ansible playbook
+        working-directory: ansible
+        run: uvx --from=ansible-core ansible-playbook -i inventory.ci.yml playbooks/site.yml --syntax-check
+
+
+  deploy:
+    name: Provision And Deploy
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: production
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Render deployment files
+        env:
+          TF_BACKEND_HCL: ${{ secrets.TF_BACKEND_HCL }}
+          TERRAFORM_TFVARS_HCL: ${{ secrets.TERRAFORM_TFVARS_HCL }}
+          ANSIBLE_DEPLOY_VARS_YAML: ${{ secrets.ANSIBLE_DEPLOY_VARS_YAML }}
+        run: |
+          set -euo pipefail
+          mkdir -p ansible/vars
+          cat > terraform/backend_override.tf <<'EOF'
+          terraform {
+            backend "s3" {}
+          }
+          EOF
+          printf '%s\n' "$TF_BACKEND_HCL" > terraform/backend.hcl
+          printf '%s\n' "$TERRAFORM_TFVARS_HCL" > terraform/terraform.github.auto.tfvars
+          printf '%s\n' "$ANSIBLE_DEPLOY_VARS_YAML" > ansible/vars/magento-deploy.generated.yml
+
+      - name: Initialize Terraform backend
+        run: terraform -chdir=terraform init -backend-config=backend.hcl
+
+      - name: Apply Terraform configuration
+        run: terraform -chdir=terraform apply -auto-approve
+
+      - name: Render live Ansible inventory
+        run: ./scripts/render_inventory.sh
+
+      - name: Run Ansible deployment
+        working-directory: ansible
+        run: uvx --from=ansible-core ansible-playbook playbooks/site.yml
