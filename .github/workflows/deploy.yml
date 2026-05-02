@@ -46,6 +46,7 @@ jobs:
           TF_BACKEND_HCL: ${{ secrets.TF_BACKEND_HCL }}
           TERRAFORM_TFVARS_HCL: ${{ secrets.TERRAFORM_TFVARS_HCL }}
           ANSIBLE_DEPLOY_VARS_YAML: ${{ secrets.ANSIBLE_DEPLOY_VARS_YAML }}
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -56,6 +57,7 @@ jobs:
             "TF_BACKEND_HCL:TF_BACKEND_HCL"
             "TERRAFORM_TFVARS_HCL:TERRAFORM_TFVARS_HCL"
             "ANSIBLE_DEPLOY_VARS_YAML:ANSIBLE_DEPLOY_VARS_YAML"
+            "ANSIBLE_SSH_PRIVATE_KEY:ANSIBLE_SSH_PRIVATE_KEY"
           )
 
           missing=()
@@ -89,6 +91,21 @@ jobs:
           printf '%s\n' "$TF_BACKEND_HCL" > terraform/backend.hcl
           printf '%s\n' "$TERRAFORM_TFVARS_HCL" > terraform/terraform.github.auto.tfvars
           printf '%s\n' "$ANSIBLE_DEPLOY_VARS_YAML" > ansible/vars/magento-deploy.generated.yml
+
+      - name: Install Ansible SSH private key
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ANSIBLE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat > ~/.ssh/config <<'EOF'
+          Host *
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
 
       - name: Initialize Terraform backend
         run: terraform -chdir=terraform init -backend-config=backend.hcl
