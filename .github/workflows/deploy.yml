@@ -50,18 +50,21 @@ jobs:
           set -euo pipefail
 
           required=(
-            HCLOUD_TOKEN
-            TF_BACKEND_AWS_ACCESS_KEY_ID
-            TF_BACKEND_AWS_SECRET_ACCESS_KEY
-            TF_BACKEND_HCL
-            TERRAFORM_TFVARS_HCL
-            ANSIBLE_DEPLOY_VARS_YAML
+            "HCLOUD_TOKEN:HCLOUD_TOKEN"
+            "TF_BACKEND_AWS_ACCESS_KEY_ID:AWS_ACCESS_KEY_ID"
+            "TF_BACKEND_AWS_SECRET_ACCESS_KEY:AWS_SECRET_ACCESS_KEY"
+            "TF_BACKEND_HCL:TF_BACKEND_HCL"
+            "TERRAFORM_TFVARS_HCL:TERRAFORM_TFVARS_HCL"
+            "ANSIBLE_DEPLOY_VARS_YAML:ANSIBLE_DEPLOY_VARS_YAML"
           )
 
           missing=()
-          for name in "${required[@]}"; do
-            if [[ -z "${!name:-}" ]]; then
-              missing+=("$name")
+          for entry in "${required[@]}"; do
+            secret_name=${entry%%:*}
+            env_name=${entry##*:}
+
+            if [[ -z "${!env_name:-}" ]]; then
+              missing+=("$secret_name")
             fi
           done
 
