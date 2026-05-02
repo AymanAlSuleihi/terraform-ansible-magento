@@ -6,25 +6,25 @@
   force_handlers: true
 
   pre_tasks:
-    - name: Check whether local Magento deploy vars exist
-      ansible.builtin.stat:
-        path: "{{ playbook_dir | dirname }}/vars/magento-deploy.yml"
-      register: magento_local_deploy_vars
-
     - name: Load local Magento deploy vars
       ansible.builtin.include_vars:
         file: "{{ playbook_dir | dirname }}/vars/magento-deploy.yml"
-      when: magento_local_deploy_vars.stat.exists
-
-    - name: Check whether generated Magento deploy vars exist
-      ansible.builtin.stat:
-        path: "{{ playbook_dir | dirname }}/vars/magento-deploy.generated.yml"
-      register: magento_generated_deploy_vars
+      when: >-
+        lookup(
+          'ansible.builtin.fileglob',
+          (playbook_dir | dirname) ~ '/vars/magento-deploy.yml',
+          wantlist=True
+        ) | length > 0
 
     - name: Load generated Magento deploy vars
       ansible.builtin.include_vars:
         file: "{{ playbook_dir | dirname }}/vars/magento-deploy.generated.yml"
-      when: magento_generated_deploy_vars.stat.exists
+      when: >-
+        lookup(
+          'ansible.builtin.fileglob',
+          (playbook_dir | dirname) ~ '/vars/magento-deploy.generated.yml',
+          wantlist=True
+        ) | length > 0
 
     - name: Validate required variables
       ansible.builtin.assert:
