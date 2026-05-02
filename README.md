@@ -1,5 +1,11 @@
 # Terraform + Ansible Magento Host
 
+[![CI](https://github.com/AymanAlSuleihi/terraform-ansible-magento/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AymanAlSuleihi/terraform-ansible-magento/actions/workflows/ci.yml)
+[![Deploy](https://github.com/AymanAlSuleihi/terraform-ansible-magento/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/AymanAlSuleihi/terraform-ansible-magento/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Magento 2.4.8-p4](https://img.shields.io/badge/Magento-2.4.8--p4-f26322)](https://experienceleague.adobe.com/en/docs/commerce-operations/release/versions)
+[![Terraform >= 1.7](https://img.shields.io/badge/Terraform-%3E%3D%201.7-844FBA?logo=terraform&logoColor=white)](https://developer.hashicorp.com/terraform)
+
 Provision a Magento Open Source 2.4.8-p4 environment on Hetzner Cloud using Terraform for infrastructure lifecycle management and Ansible for host, service, and application configuration.
 
 It delivers a single-server Magento environment with all prerequisites installed and configured, including server configuration, LEMP stack installation, phpMyAdmin, TLS certificate issuance, Magento installation, and patch application.
